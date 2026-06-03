@@ -1,0 +1,263 @@
+"""
+URG Box Trading Assistant v1.3
+================================
+변경: data_logger 연동 (매 실행마다 price_snapshot 저장)
+
+실행: py urg_alert.py
+"""
+import os
+import sqlite3
+from datetime import datetime, timedelta
+
+import requests
+import yfinance as yf
+
+from common import (
+    LOG_DB_PATH, PORTFOLIO_PATH, SETTINGS_PATH, STATE_PATH,
+    load_dotenv, read_json, write_json, now_iso
+)
+from trailing import (
+    check_trailing, check_reentry,
+    activate_trailing, load_trail
+)
+from data_logger import init_tables, save_snapshot
+
+
+def init_db():
+    conn = sqlite3.connect(LOG_DB_PATH)
+    c = conn.cursor()
+    c.execute("""
+        CREATE TABLE IF NOT EXISTS alert_log (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            timestamp TEXT,
+            ticker TEXT,
+            price REAL,
+            action TEXT,
+            label TEXT,
+            qty INTEGER,
+            message TEXT
+        )
+    """)
+    conn.commit()
+    conn.close()
+    # data_logger 테이블도 초기화
+    init_tables()
+
+
+def save_log(ticker, price, action, label, qty, message):
+    conn = sqlite3.connect(LOG_DB_PATH)
+    c = conn.cursor()
+    c.execute(
+        "INSERT INTO alert_log (timestamp,ticker,price,action,label,qty,message) VALUES (?,?,?,?,?,?,?)",
+        (now_iso(), ticker, price, action, label, qty, message)
+    )
+    conn.commit()
+    conn.close()
+
+
+def get_price(ticker):
+    yf_ticker = yf.Ticker(ticker)
+    data = yf_ticker.history(period="1d", interval="1m")
+    if data.empty:
+        data = yf_ticker.history(period="5d", interval="1d")
+    if data.empty:
+        raise RuntimeError(f"{ticker} 가격 조회 실패")
+    return round(float(data["Close"].iloc[-1]), 4)
+
+
+def send_telegram(message):
+    load_dotenv()
+    token = os.environ.get("TELEGRAM_TOKEN")
+    chat_id = os.environ.get("TELEGRAM_CHAT_ID")
+    if not token or not chat_id:
+        print("텔레그램 설정 없음: .env 확인")
+        return False
+    url = f"https://api.telegram.org/bot{token}/sendMessage"
+    r = requests.post(url, json={"chat_id": chat_id, "text": message, "parse_mode": "HTML"}, timeout=10)
+    if not r.ok:
+        print(f"텔레그램 오류: {r.status_code}")
+    return r.ok
+
+
+def load_state():
+    return read_json(STATE_PATH, default={"last_alerts": {}})
+
+
+def save_state(state):
+    write_json(STATE_PATH, state)
+
+
+def is_in_cooldown(action, label, cooldown_hours):
+    state = load_state()
+    key = f"{action}:{label}"
+    raw = state.get("last_alerts", {}).get(key)
+    if not raw:
+        return False
+    return datetime.now() - datetime.fromisoformat(raw) < timedelta(hours=cooldown_hours)
+
+
+def mark_alert(action, label):
+    state = load_state()
+    state.setdefault("last_alerts", {})[f"{action}:{label}"] = now_iso()
+    save_state(state)
+
+
+def unrealized_pnl(price, portfolio):
+    shares = int(portfolio.get("shares", 0))
+    avg = float(portfolio.get("avg_cost", 0.0))
+    if shares <= 0 or avg <= 0:
+        return 0.0, 0.0
+    return (price - avg) * shares, (price / avg - 1) * 100
+
+
+def dynamic_sell_pct(pnl_pct: float, base_pct: float) -> float:
+    bonus = 0.0
+    if pnl_pct >= 45:
+        bonus = 0.20
+    elif pnl_pct >= 35:
+        bonus = 0.10
+    return min(base_pct + bonus, 1.0)
+
+
+def evaluate(price, settings, portfolio):
+    cooldown  = int(settings.get("risk_rules", {}).get("alert_cooldown_hours", 24))
+    shares    = int(portfolio.get("shares", 0))
+    avg_cost  = float(portfolio.get("avg_cost", 0.0))
+    cash      = float(portfolio.get("cash_usd", 0.0))
+    budget    = float(portfolio.get("total_budget_usd", 0.0))
+    ticker    = settings["ticker"]
+    pnl, pnl_pct = unrealized_pnl(price, portfolio)
+
+    # 1순위: 트레일링 스탑
+    trail = check_trailing(price, shares)
+    if trail:
+        action, qty, msg = trail
+        if not is_in_cooldown(action, "트레일링스탑", cooldown):
+            return action, "트레일링스탑", qty, msg
+
+    # 2순위: 매도 구간
+    if shares > 0 and avg_cost > 0:
+        sell_candidates = []
+        for level in settings["sell_levels"]:
+            min_profit_price = avg_cost * (1 + float(level.get("min_profit_pct", 0.0)))
+            if price >= level["price"] and price >= min_profit_price:
+                if not is_in_cooldown("SELL", level["label"], cooldown):
+                    sell_candidates.append(level)
+
+        if sell_candidates:
+            level    = sell_candidates[-1]
+            adj_pct  = dynamic_sell_pct(pnl_pct, float(level["hold_pct"]))
+            qty      = min(max(1, int(shares * adj_pct)), shares)
+            msg      = make_sell_msg(ticker, price, level, qty, portfolio, pnl, pnl_pct, adj_pct)
+            return "SELL", level["label"], qty, msg
+
+    # 3순위: 재진입
+    reentry = check_reentry(price)
+    if reentry:
+        action, qty, msg = reentry
+        if not is_in_cooldown(action, "재진입", cooldown):
+            return action, "재진입", qty, msg
+
+    # 4순위: 매수
+    for level in settings["buy_levels"]:
+        if price <= level["price"] and not is_in_cooldown("BUY", level["label"], cooldown):
+            basis = cash if cash > 0 else budget
+            qty   = int(basis * float(level["budget_pct"]) / price)
+            if qty > 0:
+                msg = make_buy_msg(ticker, price, level, qty, portfolio)
+                return "BUY", level["label"], qty, msg
+
+    return None
+
+
+def make_buy_msg(ticker, price, level, qty, p):
+    now = datetime.now().strftime("%Y-%m-%d %H:%M")
+    return (
+        f"🟢 <b>[{ticker} 매수 가이드]</b>\n"
+        f"━━━━━━━━━━━━━━\n"
+        f"⏰ {now}\n"
+        f"💰 현재가: <b>${price:.4f}</b>\n"
+        f"📌 신호: <b>{level['label']}</b> (기준 ${level['price']:.4f})\n"
+        f"━━━━━━━━━━━━━━\n"
+        f"✅ 가이드\n"
+        f"  예산 {int(level['budget_pct']*100)}% / 예상 <b>{qty}주</b>\n"
+        f"  현재 보유: {p.get('shares',0)}주 / 평단 ${float(p.get('avg_cost',0)):.4f}\n"
+        f"━━━━━━━━━━━━━━\n"
+        f"⚠️ 지정가만 / 미체결 추격 금지\n"
+        f"⚠️ 체결 후: py portfolio.py buy {qty} {price:.4f}"
+    )
+
+
+def make_sell_msg(ticker, price, level, qty, p, pnl, pnl_pct, adj_pct):
+    now      = datetime.now().strftime("%Y-%m-%d %H:%M")
+    base_pct = float(level["hold_pct"]) * 100
+    bonus    = adj_pct * 100 - base_pct
+    bonus_str = f" (+{bonus:.0f}% 수익 보너스)" if bonus > 0 else ""
+    return (
+        f"🔴 <b>[{ticker} 매도 가이드]</b>\n"
+        f"━━━━━━━━━━━━━━\n"
+        f"⏰ {now}\n"
+        f"💰 현재가: <b>${price:.4f}</b>\n"
+        f"📌 신호: <b>{level['label']}</b> (기준 ${level['price']:.4f})\n"
+        f"━━━━━━━━━━━━━━\n"
+        f"📦 보유 상태\n"
+        f"  {int(p.get('shares',0))}주 / 평단 ${float(p.get('avg_cost',0)):.4f}\n"
+        f"  미실현손익: ${pnl:,.2f} ({pnl_pct:+.2f}%)\n"
+        f"━━━━━━━━━━━━━━\n"
+        f"✅ 가이드\n"
+        f"  매도 {adj_pct*100:.0f}%{bonus_str} / 예상 <b>{qty}주</b>\n"
+        f"━━━━━━━━━━━━━━\n"
+        f"⚠️ 지정가만 / 미체결 추격 금지\n"
+        f"⚠️ 체결 후: py portfolio.py sell {qty} {price:.4f}"
+    )
+
+
+def main():
+    init_db()
+    settings  = read_json(SETTINGS_PATH)
+    portfolio = read_json(PORTFOLIO_PATH)
+    ticker    = settings["ticker"]
+
+    print(f"[{datetime.now().strftime('%H:%M:%S')}] {ticker} 가격 조회 중...")
+    try:
+        price = get_price(ticker)
+    except Exception as e:
+        print(f"가격 조회 오류: {e}")
+        return
+
+    print(f"현재가: ${price:.4f}")
+
+    # ── 스냅샷 저장 (매 실행마다) ──────────────────────────
+    try:
+        save_snapshot(price)
+    except Exception as e:
+        print(f"[DataLogger] 스냅샷 저장 오류: {e}")
+
+    shares = int(portfolio.get("shares", 0))
+
+    # 보유 중이면 고점 갱신
+    if shares > 0:
+        activate_trailing(price)
+
+    pnl, pnl_pct = unrealized_pnl(price, portfolio)
+    trail_state   = load_trail()
+    high          = trail_state.get("high_price", 0)
+    print(f"보유: {shares}주 / 평단 ${portfolio.get('avg_cost',0):.4f} / 손익 ${pnl:,.2f} ({pnl_pct:+.2f}%) / 고점 ${high:.4f}")
+
+    signal = evaluate(price, settings, portfolio)
+    if not signal:
+        print("→ 신호 없음")
+        return
+
+    action, label, qty, msg = signal
+    print(f"→ {action} [{label}] {qty}주")
+    if send_telegram(msg):
+        print("텔레그램 전송 완료 ✓")
+        save_log(ticker, price, action, label, qty, msg)
+        mark_alert(action, label)
+    else:
+        print("텔레그램 전송 실패 ✗")
+
+
+if __name__ == "__main__":
+    main()

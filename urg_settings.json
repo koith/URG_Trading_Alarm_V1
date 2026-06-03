@@ -1,0 +1,79 @@
+{
+  "ticker": "URG",
+  "analysis_period": "5y",
+  "timezone": "Asia/Seoul",
+  "check_interval_minutes": 5,
+  "buy_levels": [
+    {
+      "label": "1차 매수",
+      "price": 1.08,
+      "budget_pct": 0.25,
+      "percentile": 20
+    },
+    {
+      "label": "2차 매수",
+      "price": 0.96,
+      "budget_pct": 0.35,
+      "percentile": 10
+    },
+    {
+      "label": "3차 매수",
+      "price": 0.86,
+      "budget_pct": 0.4,
+      "percentile": 5
+    }
+  ],
+  "sell_levels": [
+    {
+      "label": "1차 매도",
+      "price": 1.58,
+      "hold_pct": 0.3,
+      "min_profit_pct": 0.08,
+      "percentile": 75
+    },
+    {
+      "label": "2차 매도",
+      "price": 1.72,
+      "hold_pct": 0.4,
+      "min_profit_pct": 0.15,
+      "percentile": 88
+    },
+    {
+      "label": "3차 매도",
+      "price": 1.83,
+      "hold_pct": 1.0,
+      "min_profit_pct": 0.25,
+      "percentile": 95
+    }
+  ],
+  "risk_rules": {
+    "market_order_forbidden": true,
+    "limit_order_only": true,
+    "do_not_chase": true,
+    "alert_cooldown_hours": 24,
+    "max_one_signal_per_run": true,
+    "sell_below_avg_cost_forbidden": true
+  },
+  "generated_at": "2026-06-03T23:31:58",
+  "backtest_summary": {
+    "initial_budget": 1000.0,
+    "commission_rate": 0.001,
+    "slippage_rate": 0.002,
+    "final_cash": 3134.13,
+    "remaining_shares": 0,
+    "final_price": 1.98,
+    "final_value": 3134.13,
+    "total_return_pct": 213.41,
+    "realized_pnl": 2134.13,
+    "total_trades": 20
+  },
+  "backtest_metrics": {
+    "mdd_pct": -25.43,
+    "sharpe_ratio": 1.1785,
+    "win_rate_pct": 100.0,
+    "avg_win_usd": 177.84,
+    "avg_loss_usd": 0,
+    "avg_hold_days": 274.3,
+    "total_sell_trades": 12
+  }
+}

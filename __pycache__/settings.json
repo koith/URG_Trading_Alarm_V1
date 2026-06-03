@@ -1,0 +1,5 @@
+{
+  "ticker": "AAPL"
+  "execution_mode": "paper",
+  "paper_log_only": true
+}
