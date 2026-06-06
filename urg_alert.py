@@ -208,42 +208,48 @@ def evaluate(price, settings, portfolio):
 def make_buy_msg(ticker, price, level, qty, p):
     now = datetime.now().strftime("%Y-%m-%d %H:%M")
     return (
-        f"🟢 <b>[{ticker} 매수 가이드]</b>\n"
-        f"━━━━━━━━━━━━━━\n"
+        f"🟢 <b>[{ticker} 매수 신호]</b>\n"
+        f"━━━━━━━━━━━━━━━━━━\n"
         f"⏰ {now}\n"
         f"💰 현재가: <b>${price:.4f}</b>\n"
-        f"📌 신호: <b>{level['label']}</b> (기준 ${level['price']:.4f})\n"
-        f"━━━━━━━━━━━━━━\n"
-        f"✅ 가이드\n"
-        f"  예산 {int(level['budget_pct']*100)}% / 예상 <b>{qty}주</b>\n"
-        f"  현재 보유: {p.get('shares',0)}주 / 평단 ${float(p.get('avg_cost',0)):.4f}\n"
-        f"━━━━━━━━━━━━━━\n"
-        f"⚠️ 지정가만 / 미체결 추격 금지\n"
-        f"⚠️ 체결 후: py portfolio.py buy {qty} {price:.4f}"
+        f"📌 신호: <b>{level['label']}</b>  (기준 ${level['price']:.4f})\n"
+        f"━━━━━━━━━━━━━━━━━━\n"
+        f"📋 현재 포지션\n"
+        f"  보유 {p.get('shares', 0)}주  |  평단 ${float(p.get('avg_cost', 0)):.4f}\n"
+        f"━━━━━━━━━━━━━━━━━━\n"
+        f"✅ 매수 가이드\n"
+        f"  예산 {int(level['budget_pct']*100)}%  →  <b>{qty}주</b>\n"
+        f"━━━━━━━━━━━━━━━━━━\n"
+        f"⚠️ 지정가 주문만  /  추격 금지\n"
+        f"━━━━━━━━━━━━━━━━━━\n"
+        f"📲 <b>체결 후 실행:</b>\n"
+        f"<code>py portfolio.py buy {qty} {price:.4f}</code>"
     )
 
 
 def make_sell_msg(ticker, price, level, qty, p, pnl, pnl_pct, adj_pct):
-    now      = datetime.now().strftime("%Y-%m-%d %H:%M")
-    base_pct = float(level["hold_pct"]) * 100
-    bonus    = adj_pct * 100 - base_pct
-    bonus_str = f" (+{bonus:.0f}% 수익 보너스)" if bonus > 0 else ""
+    now       = datetime.now().strftime("%Y-%m-%d %H:%M")
+    base_pct  = float(level["hold_pct"]) * 100
+    bonus     = adj_pct * 100 - base_pct
+    bonus_str = f"  (+{bonus:.0f}% 수익 보너스)" if bonus > 0 else ""
     return (
-        f"🔴 <b>[{ticker} 매도 가이드]</b>\n"
-        f"━━━━━━━━━━━━━━\n"
+        f"🔴 <b>[{ticker} 매도 신호]</b>\n"
+        f"━━━━━━━━━━━━━━━━━━\n"
         f"⏰ {now}\n"
         f"💰 현재가: <b>${price:.4f}</b>\n"
-        f"📌 신호: <b>{level['label']}</b> (기준 ${level['price']:.4f})\n"
-        f"━━━━━━━━━━━━━━\n"
-        f"📦 보유 상태\n"
-        f"  {int(p.get('shares',0))}주 / 평단 ${float(p.get('avg_cost',0)):.4f}\n"
-        f"  미실현손익: ${pnl:,.2f} ({pnl_pct:+.2f}%)\n"
-        f"━━━━━━━━━━━━━━\n"
-        f"✅ 가이드\n"
-        f"  매도 {adj_pct*100:.0f}%{bonus_str} / 예상 <b>{qty}주</b>\n"
-        f"━━━━━━━━━━━━━━\n"
-        f"⚠️ 지정가만 / 미체결 추격 금지\n"
-        f"⚠️ 체결 후: py portfolio.py sell {qty} {price:.4f}"
+        f"📌 신호: <b>{level['label']}</b>  (기준 ${level['price']:.4f})\n"
+        f"━━━━━━━━━━━━━━━━━━\n"
+        f"📦 현재 포지션\n"
+        f"  보유 {int(p.get('shares', 0))}주  |  평단 ${float(p.get('avg_cost', 0)):.4f}\n"
+        f"  미실현: <b>${pnl:,.2f}</b>  ({pnl_pct:+.2f}%)\n"
+        f"━━━━━━━━━━━━━━━━━━\n"
+        f"✅ 매도 가이드\n"
+        f"  {adj_pct*100:.0f}% 매도{bonus_str}  →  <b>{qty}주</b>\n"
+        f"━━━━━━━━━━━━━━━━━━\n"
+        f"⚠️ 지정가 주문만  /  추격 금지\n"
+        f"━━━━━━━━━━━━━━━━━━\n"
+        f"📲 <b>체결 후 실행:</b>\n"
+        f"<code>py portfolio.py sell {qty} {price:.4f}</code>"
     )
 
 
