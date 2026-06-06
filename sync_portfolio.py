@@ -10,20 +10,8 @@ KIS 계좌 → portfolio.json 자동 동기화 v1.0
 import os
 import requests
 from datetime import datetime
-from common import PORTFOLIO_PATH, ENV_PATH, read_json, write_json, now_iso
-
-# ============================================================
-# ENV 로드
-# ============================================================
-def load_dotenv():
-    if not ENV_PATH.exists():
-        return
-    for line in ENV_PATH.read_text(encoding="utf-8").splitlines():
-        line = line.strip()
-        if not line or line.startswith("#") or "=" not in line:
-            continue
-        key, value = line.split("=", 1)
-        os.environ.setdefault(key.strip(), value.strip())
+from pathlib import Path
+from common import PORTFOLIO_PATH, BASE_DIR, read_json, write_json, now_iso, load_dotenv
 
 load_dotenv()
 
@@ -33,8 +21,8 @@ ACCOUNT_NO  = os.environ.get("KIS_ACCOUNT_NO", "")   # 앞 8자리
 ACCOUNT_CD  = os.environ.get("KIS_ACCOUNT_CODE", "01")  # 뒤 2자리
 TARGET      = "URG"  # 조회할 종목
 
-BASE_URL = "https://openapi.koreainvestment.com:9443"
-TOKEN_PATH = __import__('pathlib').Path(__file__).parent / ".kis_token.json"
+BASE_URL   = "https://openapi.koreainvestment.com:9443"
+TOKEN_PATH = BASE_DIR / ".kis_token.json"
 
 # ============================================================
 # 토큰 관리 (하루 1회 발급 원칙)
