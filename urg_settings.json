@@ -53,7 +53,10 @@
     "do_not_chase": true,
     "alert_cooldown_hours": 24,
     "max_one_signal_per_run": true,
-    "sell_below_avg_cost_forbidden": true
+    "sell_below_avg_cost_forbidden": true,
+    "max_daily_trades": 3,
+    "max_daily_buy": 2,
+    "max_daily_sell": 2
   },
   "generated_at": "2026-06-03T23:31:58",
   "backtest_summary": {

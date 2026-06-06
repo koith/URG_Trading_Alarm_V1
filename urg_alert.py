@@ -112,6 +112,23 @@ def unrealized_pnl(price, portfolio):
     return (price - avg) * shares, (price / avg - 1) * 100
 
 
+def get_daily_counts():
+    """오늘 날짜 기준 alert_log에서 매수/매도 신호 횟수 반환 (BUY+REENTRY, SELL+TRAIL_STOP)"""
+    today = datetime.now().strftime("%Y-%m-%d")
+    p = get_placeholder()
+    conn = get_db_connection()
+    c = conn.cursor()
+    c.execute(
+        f"SELECT action, COUNT(*) FROM alert_log WHERE timestamp LIKE {p} AND action != 'TEST' GROUP BY action",
+        (f"{today}%",)
+    )
+    raw = {action: cnt for action, cnt in c.fetchall()}
+    conn.close()
+    buy_count  = raw.get("BUY", 0) + raw.get("REENTRY", 0)
+    sell_count = raw.get("SELL", 0) + raw.get("TRAIL_STOP", 0)
+    return buy_count, sell_count
+
+
 def dynamic_sell_pct(pnl_pct: float, base_pct: float) -> float:
     bonus = 0.0
     if pnl_pct >= 45:
@@ -122,7 +139,10 @@ def dynamic_sell_pct(pnl_pct: float, base_pct: float) -> float:
 
 
 def evaluate(price, settings, portfolio):
-    cooldown  = int(settings.get("risk_rules", {}).get("alert_cooldown_hours", 24))
+    risk      = settings.get("risk_rules", {})
+    cooldown  = int(risk.get("alert_cooldown_hours", 24))
+    max_buy   = int(risk.get("max_daily_buy", 99))
+    max_sell  = int(risk.get("max_daily_sell", 99))
     shares    = int(portfolio.get("shares", 0))
     avg_cost  = float(portfolio.get("avg_cost", 0.0))
     cash      = float(portfolio.get("cash_usd", 0.0))
@@ -130,14 +150,18 @@ def evaluate(price, settings, portfolio):
     ticker    = settings["ticker"]
     pnl, pnl_pct = unrealized_pnl(price, portfolio)
 
-    # 1순위: 트레일링 스탑
+    daily_buy, daily_sell = get_daily_counts()
+
+    # 1순위: 트레일링 스탑 (매도 계열)
     trail = check_trailing(price, shares)
     if trail:
         action, qty, msg = trail
-        if not is_in_cooldown(action, "트레일링스탑", cooldown):
+        if daily_sell >= max_sell:
+            print(f"[리스크] 일일 매도 한도 도달 ({daily_sell}/{max_sell}) → {action} 차단")
+        elif not is_in_cooldown(action, "트레일링스탑", cooldown):
             return action, "트레일링스탑", qty, msg
 
-    # 2순위: 매도 구간
+    # 2순위: 매도 구간 (매도 계열)
     if shares > 0 and avg_cost > 0:
         sell_candidates = []
         for level in settings["sell_levels"]:
@@ -147,20 +171,29 @@ def evaluate(price, settings, portfolio):
                     sell_candidates.append(level)
 
         if sell_candidates:
-            level    = sell_candidates[-1]
-            adj_pct  = dynamic_sell_pct(pnl_pct, float(level["hold_pct"]))
-            qty      = min(max(1, int(shares * adj_pct)), shares)
-            msg      = make_sell_msg(ticker, price, level, qty, portfolio, pnl, pnl_pct, adj_pct)
-            return "SELL", level["label"], qty, msg
+            if daily_sell >= max_sell:
+                print(f"[리스크] 일일 매도 한도 도달 ({daily_sell}/{max_sell}) → SELL 차단")
+            else:
+                level   = sell_candidates[-1]
+                adj_pct = dynamic_sell_pct(pnl_pct, float(level["hold_pct"]))
+                qty     = min(max(1, int(shares * adj_pct)), shares)
+                msg     = make_sell_msg(ticker, price, level, qty, portfolio, pnl, pnl_pct, adj_pct)
+                return "SELL", level["label"], qty, msg
 
-    # 3순위: 재진입
+    # 3순위: 재진입 (매수 계열)
     reentry = check_reentry(price)
     if reentry:
         action, qty, msg = reentry
-        if not is_in_cooldown(action, "재진입", cooldown):
+        if daily_buy >= max_buy:
+            print(f"[리스크] 일일 매수 한도 도달 ({daily_buy}/{max_buy}) → {action} 차단")
+        elif not is_in_cooldown(action, "재진입", cooldown):
             return action, "재진입", qty, msg
 
-    # 4순위: 매수
+    # 4순위: 매수 (매수 계열)
+    if daily_buy >= max_buy:
+        print(f"[리스크] 일일 매수 한도 도달 ({daily_buy}/{max_buy}) → 매수 신호 차단")
+        return None
+
     for level in settings["buy_levels"]:
         if price <= level["price"] and not is_in_cooldown("BUY", level["label"], cooldown):
             basis = cash if cash > 0 else budget
