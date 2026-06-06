@@ -14,7 +14,7 @@ from datetime import datetime, timedelta
 import pytz
 
 from common import read_json, SETTINGS_PATH
-from urg_alert import main as run_alert, init_db, send_telegram
+from urg_alert import main as run_alert, init_db
 from sync_portfolio import main as run_sync
 
 KST = pytz.timezone("Asia/Seoul")
@@ -25,14 +25,9 @@ _last_sync_time = None
 
 
 def heartbeat():
-    """1시간마다 스케줄러 생존 알림 전송 (장 외 시간 포함)"""
+    """1시간마다 Railway Deploy Logs에 생존 기록"""
     now_str = datetime.now(KST).strftime("%Y-%m-%d %H:%M")
-    msg = f"[URG] 스케줄러 정상 실행 중 | {now_str}"
-    print(f"[Heartbeat] {now_str}")
-    try:
-        send_telegram(msg)
-    except Exception as e:
-        print(f"[Heartbeat] 전송 오류: {e}")
+    print(f"[HEARTBEAT] URG 스케줄러 정상 실행 중 | {now_str}")
 
 
 def is_us_dst_rough(now_kst):
