@@ -1,5 +1,6 @@
 {
   "ticker": "URG",
+  "test_mode": false,
   "analysis_period": "5y",
   "timezone": "Asia/Seoul",
   "check_interval_minutes": 5,

@@ -226,6 +226,8 @@ def main():
         return
 
     print(f"현재가: ${price:.4f}")
+    if settings.get("test_mode", False):
+        save_log(ticker, price, "TEST", "MANUAL", 1, "manual test")
 
     # ── 스냅샷 저장 (매 실행마다) ──────────────────────────
     try:
