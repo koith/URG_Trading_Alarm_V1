@@ -219,3 +219,7 @@ __marimo__/
 
 # Legacy ChatGPT workspace (보존용, 추적 제외)
 legacy_chatgpt/
+
+# 로컬 테스트 스크립트
+mock_test.py
+test_trailing.py
