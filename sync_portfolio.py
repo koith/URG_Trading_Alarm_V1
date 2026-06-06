@@ -1,5 +1,5 @@
 """
-KIS 계좌 → portfolio.json 자동 동기화 v1.1
+KIS 계좌 → portfolio.json 자동 동기화 v1.2
 ============================================
 - 한투 계좌에서 URG 보유량/평단가 자동 조회
 - portfolio.json 자동 업데이트
@@ -10,7 +10,10 @@ KIS 계좌 → portfolio.json 자동 동기화 v1.1
 import os
 import requests
 from datetime import datetime, timedelta
-from common import PORTFOLIO_PATH, BASE_DIR, read_json, write_json, now_iso, load_dotenv
+from common import (
+    PORTFOLIO_PATH, BASE_DIR, read_json, write_json, now_iso, load_dotenv,
+    get_db_connection, get_placeholder, is_postgres,
+)
 
 TARGET     = "URG"
 BASE_URL   = "https://openapi.koreainvestment.com:9443"
@@ -18,16 +21,67 @@ TOKEN_PATH = BASE_DIR / ".kis_token.json"
 
 
 # ============================================================
+# 토큰 캐시 — DB (PostgreSQL) 또는 파일 (로컬 SQLite)
+# ============================================================
+def _init_token_table():
+    conn = get_db_connection()
+    c = conn.cursor()
+    c.execute("""
+        CREATE TABLE IF NOT EXISTS kis_token (
+            access_token TEXT,
+            expires_at   TEXT
+        )
+    """)
+    conn.commit()
+    conn.close()
+
+
+def _read_token_from_db():
+    """저장된 토큰 행 반환 → (access_token, expires_at) 또는 None"""
+    conn = get_db_connection()
+    c = conn.cursor()
+    c.execute("SELECT access_token, expires_at FROM kis_token LIMIT 1")
+    row = c.fetchone()
+    conn.close()
+    return row
+
+
+def _write_token_to_db(access_token, expires_at):
+    """기존 행 삭제 후 새 토큰 1행 저장"""
+    p = get_placeholder()
+    conn = get_db_connection()
+    c = conn.cursor()
+    c.execute("DELETE FROM kis_token")
+    c.execute(
+        f"INSERT INTO kis_token (access_token, expires_at) VALUES ({p}, {p})",
+        (access_token, expires_at)
+    )
+    conn.commit()
+    conn.close()
+
+
+# ============================================================
 # 토큰 관리 (하루 1회 발급 원칙)
 # ============================================================
 def get_token(app_key, app_secret):
-    if TOKEN_PATH.exists():
-        cached = read_json(TOKEN_PATH, default={})
-        expires = cached.get("expires_at", "")
-        if expires and datetime.fromisoformat(expires) > datetime.now():
-            print("[KIS] 캐시 토큰 사용")
-            return cached["access_token"]
+    # ── 캐시 확인 ──────────────────────────────────────────
+    if is_postgres():
+        _init_token_table()
+        row = _read_token_from_db()
+        if row:
+            access_token, expires_at = row
+            if expires_at and datetime.fromisoformat(expires_at) > datetime.now():
+                print("[KIS] DB 캐시 토큰 사용")
+                return access_token
+    else:
+        if TOKEN_PATH.exists():
+            cached = read_json(TOKEN_PATH, default={})
+            expires = cached.get("expires_at", "")
+            if expires and datetime.fromisoformat(expires) > datetime.now():
+                print("[KIS] 파일 캐시 토큰 사용")
+                return cached["access_token"]
 
+    # ── 새 토큰 발급 ───────────────────────────────────────
     print("[KIS] 토큰 발급 중...")
     res = requests.post(
         f"{BASE_URL}/oauth2/tokenP",
@@ -43,13 +97,16 @@ def get_token(app_key, app_secret):
     if "access_token" not in data:
         raise RuntimeError(f"토큰 발급 실패: {data}")
 
+    new_token  = data["access_token"]
     expires_at = (datetime.now() + timedelta(hours=23)).isoformat()
-    write_json(TOKEN_PATH, {
-        "access_token": data["access_token"],
-        "expires_at": expires_at
-    })
+
+    if is_postgres():
+        _write_token_to_db(new_token, expires_at)
+    else:
+        write_json(TOKEN_PATH, {"access_token": new_token, "expires_at": expires_at})
+
     print("[KIS] 토큰 발급 완료")
-    return data["access_token"]
+    return new_token
 
 
 # ============================================================
