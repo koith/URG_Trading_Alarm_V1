@@ -216,3 +216,6 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# Legacy ChatGPT workspace (보존용, 추적 제외)
+legacy_chatgpt/
