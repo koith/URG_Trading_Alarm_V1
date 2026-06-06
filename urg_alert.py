@@ -6,15 +6,15 @@ URG Box Trading Assistant v1.3
 실행: py urg_alert.py
 """
 import os
+import sqlite3
 from datetime import datetime, timedelta
 
 import requests
 import yfinance as yf
 
 from common import (
-    PORTFOLIO_PATH, SETTINGS_PATH, STATE_PATH,
-    load_dotenv, read_json, write_json, now_iso,
-    get_db_connection, get_placeholder, is_postgres
+    LOG_DB_PATH, PORTFOLIO_PATH, SETTINGS_PATH, STATE_PATH,
+    load_dotenv, read_json, write_json, now_iso
 )
 from trailing import (
     check_trailing, check_reentry,
@@ -24,12 +24,11 @@ from data_logger import init_tables, save_snapshot
 
 
 def init_db():
-    pk = "SERIAL PRIMARY KEY" if is_postgres() else "INTEGER PRIMARY KEY AUTOINCREMENT"
-    conn = get_db_connection()
+    conn = sqlite3.connect(LOG_DB_PATH)
     c = conn.cursor()
-    c.execute(f"""
+    c.execute("""
         CREATE TABLE IF NOT EXISTS alert_log (
-            id {pk},
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
             timestamp TEXT,
             ticker TEXT,
             price REAL,
@@ -46,11 +45,10 @@ def init_db():
 
 
 def save_log(ticker, price, action, label, qty, message):
-    p = get_placeholder()
-    conn = get_db_connection()
+    conn = sqlite3.connect(LOG_DB_PATH)
     c = conn.cursor()
     c.execute(
-        f"INSERT INTO alert_log (timestamp,ticker,price,action,label,qty,message) VALUES ({p},{p},{p},{p},{p},{p},{p})",
+        "INSERT INTO alert_log (timestamp,ticker,price,action,label,qty,message) VALUES (?,?,?,?,?,?,?)",
         (now_iso(), ticker, price, action, label, qty, message)
     )
     conn.commit()
