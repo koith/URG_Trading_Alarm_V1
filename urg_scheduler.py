@@ -1,5 +1,5 @@
 """
-URG 스케줄러 v1.2
+URG 스케줄러 v1.3
 - 5분마다 실행 (urg_settings.json check_interval_minutes 반영)
 - 한국시간 기준 미국 정규장 감지
 - 서머타임 근사 반영
@@ -13,7 +13,7 @@ from datetime import datetime, timedelta
 import pytz
 
 from common import read_json, SETTINGS_PATH
-from urg_alert import main as run_alert
+from urg_alert import main as run_alert, init_db
 from sync_portfolio import main as run_sync
 
 KST = pytz.timezone("Asia/Seoul")
@@ -63,10 +63,11 @@ def main():
     settings = read_json(SETTINGS_PATH)
     interval = int(settings.get("check_interval_minutes", 5))
     print("=" * 50)
-    print("URG 스케줄러 v1.2")
+    print("URG 스케줄러 v1.3")
     print(f"체크 주기: {interval}분 / 포트폴리오 동기화: {SYNC_INTERVAL_MINUTES}분")
     print("종료: Ctrl+C")
     print("=" * 50)
+    init_db()  # 장 외 시간 배포 시에도 DB 테이블 보장
     schedule.every(interval).minutes.do(job)
     job()
     while True:
