@@ -1,5 +1,5 @@
 """
-KIS 계좌 → portfolio.json 자동 동기화 v1.0
+KIS 계좌 → portfolio.json 자동 동기화 v1.1
 ============================================
 - 한투 계좌에서 URG 보유량/평단가 자동 조회
 - portfolio.json 자동 업데이트
@@ -9,26 +9,18 @@ KIS 계좌 → portfolio.json 자동 동기화 v1.0
 """
 import os
 import requests
-from datetime import datetime
-from pathlib import Path
+from datetime import datetime, timedelta
 from common import PORTFOLIO_PATH, BASE_DIR, read_json, write_json, now_iso, load_dotenv
 
-load_dotenv()
-
-APP_KEY     = os.environ.get("KIS_APP_KEY", "")
-APP_SECRET  = os.environ.get("KIS_APP_SECRET", "")
-ACCOUNT_NO  = os.environ.get("KIS_ACCOUNT_NO", "")   # 앞 8자리
-ACCOUNT_CD  = os.environ.get("KIS_ACCOUNT_CODE", "01")  # 뒤 2자리
-TARGET      = "URG"  # 조회할 종목
-
+TARGET     = "URG"
 BASE_URL   = "https://openapi.koreainvestment.com:9443"
 TOKEN_PATH = BASE_DIR / ".kis_token.json"
+
 
 # ============================================================
 # 토큰 관리 (하루 1회 발급 원칙)
 # ============================================================
-def get_token():
-    # 캐시된 토큰 확인
+def get_token(app_key, app_secret):
     if TOKEN_PATH.exists():
         cached = read_json(TOKEN_PATH, default={})
         expires = cached.get("expires_at", "")
@@ -36,14 +28,13 @@ def get_token():
             print("[KIS] 캐시 토큰 사용")
             return cached["access_token"]
 
-    # 새 토큰 발급
     print("[KIS] 토큰 발급 중...")
     res = requests.post(
         f"{BASE_URL}/oauth2/tokenP",
         json={
             "grant_type": "client_credentials",
-            "appkey": APP_KEY,
-            "appsecret": APP_SECRET
+            "appkey": app_key,
+            "appsecret": app_secret
         },
         headers={"content-type": "application/json"},
         timeout=10
@@ -52,8 +43,6 @@ def get_token():
     if "access_token" not in data:
         raise RuntimeError(f"토큰 발급 실패: {data}")
 
-    # 만료 23시간 후로 설정 (24시간 유효, 여유 1시간)
-    from datetime import timedelta
     expires_at = (datetime.now() + timedelta(hours=23)).isoformat()
     write_json(TOKEN_PATH, {
         "access_token": data["access_token"],
@@ -66,23 +55,20 @@ def get_token():
 # ============================================================
 # 해외주식 잔고 조회
 # ============================================================
-def get_overseas_balance(token):
-    """
-    해외주식 잔고 조회
-    TR: JTTT3012R (해외주식 잔고)
-    """
+def get_overseas_balance(token, app_key, app_secret, account_no, account_cd):
+    """TR: JTTT3012R (해외주식 잔고)"""
     headers = {
         "content-type": "application/json",
         "authorization": f"Bearer {token}",
-        "appkey": APP_KEY,
-        "appsecret": APP_SECRET,
+        "appkey": app_key,
+        "appsecret": app_secret,
         "tr_id": "JTTT3012R",
         "custtype": "P"
     }
     params = {
-        "CANO": ACCOUNT_NO,
-        "ACNT_PRDT_CD": ACCOUNT_CD,
-        "OVRS_EXCG_CD": "NASD",   # 나스닥 (URG 상장)
+        "CANO": account_no,
+        "ACNT_PRDT_CD": account_cd,
+        "OVRS_EXCG_CD": "NASD",
         "TR_CRCY_CD": "USD",
         "CTX_AREA_FK200": "",
         "CTX_AREA_NK200": ""
@@ -104,8 +90,8 @@ def extract_urg(data):
     for item in output:
         symb = item.get("ovrs_pdno", "").strip().upper()
         if symb == TARGET:
-            qty  = int(item.get("ovrs_cblc_qty", 0))
-            avg  = float(item.get("pchs_avg_pric", 0.0))
+            qty      = int(item.get("ovrs_cblc_qty", 0))
+            avg      = float(item.get("pchs_avg_pric", 0.0))
             eval_amt = float(item.get("ovrs_stck_evlu_amt", 0.0))
             return qty, avg, eval_amt
     return 0, 0.0, 0.0
@@ -116,8 +102,6 @@ def extract_urg(data):
 # ============================================================
 def update_portfolio(qty, avg, eval_amt):
     old = read_json(PORTFOLIO_PATH, default={})
-
-    # 수동 입력 필드는 유지 (예산, 현금, 실현손익, 거래기록)
     old.update({
         "ticker": TARGET,
         "shares": qty,
@@ -137,12 +121,18 @@ def main():
     print("KIS 포트폴리오 동기화")
     print("=" * 40)
 
-    if not APP_KEY or not ACCOUNT_NO:
+    load_dotenv()
+    app_key    = os.environ.get("KIS_APP_KEY", "")
+    app_secret = os.environ.get("KIS_APP_SECRET", "")
+    account_no = os.environ.get("KIS_ACCOUNT_NO", "")
+    account_cd = os.environ.get("KIS_ACCOUNT_CODE", "01")
+
+    if not app_key or not account_no:
         print("오류: .env에 KIS_APP_KEY / KIS_ACCOUNT_NO 확인")
         return
 
-    token = get_token()
-    data  = get_overseas_balance(token)
+    token = get_token(app_key, app_secret)
+    data  = get_overseas_balance(token, app_key, app_secret, account_no, account_cd)
 
     rt_cd = data.get("rt_cd", "")
     msg   = data.get("msg1", "")
