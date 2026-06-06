@@ -11,6 +11,24 @@ LOG_DB_PATH = BASE_DIR / "urg_log.db"
 ENV_PATH = BASE_DIR / ".env"
 
 
+def is_postgres() -> bool:
+    return bool(os.environ.get("DATABASE_URL"))
+
+
+def get_db_connection():
+    """DATABASE_URL 있으면 PostgreSQL, 없으면 로컬 SQLite."""
+    if is_postgres():
+        import psycopg2
+        return psycopg2.connect(os.environ["DATABASE_URL"])
+    import sqlite3
+    return sqlite3.connect(LOG_DB_PATH)
+
+
+def get_placeholder() -> str:
+    """SQL 파라미터 플레이스홀더: PostgreSQL=%s, SQLite=?"""
+    return "%s" if is_postgres() else "?"
+
+
 def load_dotenv():
     if not ENV_PATH.exists():
         return
