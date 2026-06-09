@@ -79,5 +79,12 @@
     "avg_loss_usd": 0,
     "avg_hold_days": 274.3,
     "total_sell_trades": 12
+  },
+  "market_rules": {
+    "enable_premarket_watch": true,
+    "premarket_start_kst": "17:00",
+    "regular_start_kst": "22:30",
+    "regular_end_kst": "05:00",
+    "allow_alerts_in_premarket": false
   }
 }

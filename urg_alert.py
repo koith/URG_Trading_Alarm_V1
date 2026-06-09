@@ -59,9 +59,9 @@ def save_log(ticker, price, action, label, qty, message):
 
 def get_price(ticker):
     yf_ticker = yf.Ticker(ticker)
-    data = yf_ticker.history(period="1d", interval="1m")
+    data = yf_ticker.history(period="1d", interval="1m", prepost=True)
     if data.empty:
-        data = yf_ticker.history(period="5d", interval="1d")
+        data = yf_ticker.history(period="5d", interval="1d", prepost=True)
     if data.empty:
         raise RuntimeError(f"{ticker} 가격 조회 실패")
     return round(float(data["Close"].iloc[-1]), 4)
@@ -253,7 +253,12 @@ def make_sell_msg(ticker, price, level, qty, p, pnl, pnl_pct, adj_pct):
     )
 
 
-def main():
+def main(market_segment="regular"):
+    """
+    market_segment: 'regular' | 'premarket'
+      - 'regular'   : 정상 평가 → 조건 충족 시 텔레그램 + alert_log 저장
+      - 'premarket' : allow_alerts_in_premarket=false 이면 snapshot만 저장, 알림 차단
+    """
     init_db()
     settings  = read_json(SETTINGS_PATH)
     portfolio = read_json(PORTFOLIO_PATH)
@@ -275,6 +280,13 @@ def main():
         save_snapshot(price)
     except Exception as e:
         print(f"[DataLogger] 스냅샷 저장 오류: {e}")
+
+    # ── 프리마켓 알림 차단 ─────────────────────────────────────
+    market_rules = settings.get("market_rules", {})
+    allow_alerts_in_premarket = market_rules.get("allow_alerts_in_premarket", False)
+    if market_segment == "premarket" and not allow_alerts_in_premarket:
+        print(f"[PREMARKET] 알림 차단: snapshot만 저장 완료 (가격: ${price:.4f})")
+        return
 
     shares = int(portfolio.get("shares", 0))
 
