@@ -1,25 +1,25 @@
 {
   "ticker": "URG",
   "test_mode": false,
-  "analysis_period": "5y",
+  "analysis_period": "1y",
   "timezone": "Asia/Seoul",
   "check_interval_minutes": 5,
   "buy_levels": [
     {
       "label": "1차 매수",
-      "price": 1.08,
+      "price": 1.27,
       "budget_pct": 0.25,
       "percentile": 20
     },
     {
       "label": "2차 매수",
-      "price": 0.96,
+      "price": 1.17,
       "budget_pct": 0.35,
       "percentile": 10
     },
     {
       "label": "3차 매수",
-      "price": 0.86,
+      "price": 1.07,
       "budget_pct": 0.4,
       "percentile": 5
     }
